@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <X11/Xlib.h>
+#include <X11/Xutil.h>
 #include <jpeglib.h>
 
 int jpegWriteFileFromImage(char *filename, XImage *img){
@@ -92,6 +93,212 @@ int capscreen(){
 	return 1;
 }
 
+int gc_depth(int depth, Display *display, Window scr, Window root, GC *gc){
+	Window win;
+	Visual *visual;
+	XVisualInfo vis_info;
+	XSetWindowAttributes win_attr;
+	unsigned long win_mask;
+
+	if(!XMatchVisualInfo(display, scr, depth, TrueColor, &vis_info)){
+		printf("%d depth not supported\n", depth);
+		return 0;
+	}
+
+	visual = vis_info.visual;
+	win_attr.colormap = XCreateColormap(display, root, visual, AllocNone);
+	win_attr.background_pixel = 0;
+	win_attr.border_pixel = 0;
+
+	win_mask = CWBackPixel | CWColormap | CWBorderPixel;
+	win = XCreateWindow(display, root, 0, 0, 100, 100, 0, depth, InputOutput, visual, win_mask, &win_attr);
+
+	*gc = XCreateGC(display, win, 0, 0);
+	return 1;
+}
+
+int cover_screen(){
+	int w = 100;
+	int h = 100;
+	int depth = 32;
+	int bitmap_pad = 32;
+	int bpl = 0;
+
+	Display *display;
+	Window root;
+	Window scr;
+	GC gc;
+	int root_depth;
+
+	Pixmap pm;
+	XImage *img;
+	unsigned char *buf_img;
+
+	if(!(display = XOpenDisplay(NULL))){
+		printf("open display fail\n");
+		return 0;
+	}
+
+	root = XDefaultRootWindow(display);
+	scr = XDefaultScreen(display);
+
+	if((buf_img = malloc(w*h*4)) == NULL){
+		printf("alloacte %d bytes fail\n", w*h*4);
+		return 0;
+	}
+
+	int i;
+	for(i=0; i<w*h*4; i++){
+		*(buf_img+i) = 0x99;
+	}
+
+	root_depth = DefaultDepth(display, scr);
+	printf("default depth : %d\n", root_depth);
+
+	if(depth != root_depth){
+		if(!gc_depth(depth, display, scr, root, &gc)){
+			return 0;
+		}
+	}else{
+		gc = DefaultGC(display, 0);
+	}
+
+	img = XCreateImage(display, CopyFromParent, depth, ZPixmap, 0, (char*)buf_img, w, h, bitmap_pad, bpl);
+	pm = XCreatePixmap(display, root, w, h, depth);
+	XPutImage(display, pm, gc, img, 0, 0, 0, 0, w, h);
+	XSync(display, TRUE);
+
+	XEvent ev;
+	while(1){
+		XNextEvent(display, &ev);
+	}
+
+	XFreePixmap(display, pm);
+	XDestroyImage(img);
+	XFreeGC(display, gc);
+
+//	Window desktop;
+//	Display *display;
+//
+//	int screen_width;
+//	int screen_height;
+//	int win_x;
+//	int win_y;
+//	int win_border_width = 0;
+//
+//	display = XOpenDisplay(NULL);
+//	if(!display){
+//		printf("cannot connect to local display\n");
+//		return 0;
+//	}
+//
+//	desktop = RootWindow(display, 0);
+//	if(!desktop){
+//		printf("cannot get root window\n");
+//		return 0;
+//	}
+//
+//	screen_width = DisplayWidth(display, 0);
+//	screen_height = DisplayHeight(display, 0);
+//
+//	win_x = win_y = 0;
+//
+//	Window win = XCreateSimpleWindow(display, desktop, win_x, win_y, screen_width, screen_height, win_border_width, BlackPixel(display, 0), WhitePixel(display, 0));
+//	XMapWindow(display, win);
+//
+//	GC gc;
+//	XGCValues values;
+//	unsigned long valuemask = 0;
+//	gc = XCreateGC(display, win, valuemask, &values);
+//	XSync(display, False);
+//	if(gc < 0){
+//		printf("xcreategc error\n");
+//		return 0;
+//	}
+//
+//	XSetBackground(display, gc, WhitePixel(display, 0));
+//	XSetForeground(display, gc, BlackPixel(display, 0));
+//
+//	XFlush(display);
+//	while(1){
+//
+//	}
+//	XCloseDisplay(display);
+	return 1;
+}
+
+int test_cover(){
+	int screen_width;
+	int screen_height;
+	Display *display;
+	int depth = 32;
+	int bitmap_pad = 32;
+	int bytes_per_line = 0;
+
+	display = XOpenDisplay(NULL);
+	if(!display){
+		printf("cannot connect to local display\n");
+		return 0;
+	}
+	screen_width = DisplayWidth(display, 0);
+	screen_height = DisplayHeight(display, 0);
+	printf("width:%d height:%d\n", screen_width, screen_height);
+	unsigned char *image32 = (unsigned char *)malloc(screen_width * screen_height * 4);
+	int i;
+	for(i=0; i<screen_width*screen_height*4; i++){
+		*(image32+i) = 0x44;
+	}
+	XImage *img = XCreateImage(display, CopyFromParent, depth, ZPixmap, 0, image32, screen_width, screen_height, bitmap_pad, bytes_per_line);
+	Pixmap p = XCreatePixmap(display, XDefaultRootWindow(display), screen_width, screen_height, depth);
+	XGCValues gcvalues;
+	GC gc = XCreateGC(display, p, 0, &gcvalues);
+	XPutImage(display, p, gc, img, 0, 0, 0, 0, screen_width, screen_height);
+
+	XEvent ev;
+	while(1){
+		XNextEvent(display, &ev);
+	}
+	return 1;
+}
+
+int test_cover2(){
+	Display *display = XOpenDisplay(NULL);
+	XVisualInfo vinfo;
+	XMatchVisualInfo(display, DefaultScreen(display), 32, TrueColor, &vinfo);
+	XSetWindowAttributes attr;
+	attr.colormap = XCreateColormap(display, DefaultRootWindow(display), vinfo.visual, AllocNone);
+	attr.border_pixel = 0;
+	attr.background_pixel = 0;
+
+	Window win = XCreateWindow(display, DefaultRootWindow(display), 0, 0, 400, 400, 0, vinfo.depth, InputOutput, vinfo.visual, CWColormap | CWBorderPixel | CWBackPixel, &attr);
+	GC gc = XCreateGC(display, win, 0, 0);
+
+	XSelectInput(display, win, StructureNotifyMask);
+	Atom wm_delete_window = XInternAtom(display, "WM_DELETE_WINDOW", 0);
+	XSetWMProtocols(display, win, &wm_delete_window, 1);
+
+	XMapWindow(display, win);
+
+	int keep_running = 1;
+	XEvent event;
+	while(keep_running){
+		XNextEvent(display, &event);
+		switch(event.type){
+		case ClientMessage:
+			if(event.xclient.message_type == XInternAtom(display, "WM_PROTOCOLS", 1) && (Atom)event.xclient.data.l[0] == XInternAtom(display, "WM_DELETE_WINDOW", 1)){
+				keep_running = 0;
+			}
+			break;
+		default:
+			break;
+		}
+	}
+
+	XDestroyWindow(display, win);
+	XCloseDisplay(display);
+	return 1;
+}
+
 int main(void) {
 
 	int keys_fd;
@@ -126,11 +333,14 @@ int main(void) {
 						mode_capscreen = 0;
 						if(shortcut_keys[0] == KEY_LEFTCTRL && shortcut_keys[1] == KEY_LEFTALT && shortcut_keys[2] == KEY_A){
 							printf("capscreen !!!\n");
-							if(capscreen()){
-								printf("capscreen success !\n");
-							}else{
-								printf("capscreen fail !\n");
-							}
+//							cover_screen();
+//							test_cover();
+							test_cover2();
+//							if(capscreen()){
+//								printf("capscreen success !\n");
+//							}else{
+//								printf("capscreen fail !\n");
+//							}
 						}
 					}
 				}
